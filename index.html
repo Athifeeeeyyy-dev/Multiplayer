@@ -7,21 +7,26 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #000; color: #ccc; font-family: monospace; overflow: hidden; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-
   #app { display: flex; flex-direction: column; align-items: center; width: 100%; }
 
   /* ── LOBBY ── */
   #lobby { display: flex; flex-direction: column; align-items: center; gap: 14px; }
   #lobby h1 { font-size: 32px; color: #cc0000; letter-spacing: 6px; text-shadow: 0 0 20px #660000; }
-  #lobby p { font-size: 12px; color: #440000; letter-spacing: 2px; }
-  .lobby-input { background: #0a0005; border: 1px solid #440000; color: #cc4444; padding: 8px 14px; font-size: 13px; font-family: monospace; width: 260px; }
-  .lobby-btn { background: #0a0000; border: 1px solid #cc0000; color: #cc0000; padding: 9px 28px; font-size: 13px; letter-spacing: 3px; cursor: pointer; font-family: monospace; width: 260px; }
+  #lobby p.sub { font-size: 12px; color: #440000; letter-spacing: 2px; }
+  .lobby-input { background: #0a0005; border: 1px solid #440000; color: #cc4444; padding: 8px 14px; font-size: 13px; font-family: monospace; width: 300px; }
+  .lobby-input:focus { outline: none; border-color: #880000; }
+  .lobby-btn { background: #0a0000; border: 1px solid #cc0000; color: #cc0000; padding: 9px 28px; font-size: 13px; letter-spacing: 3px; cursor: pointer; font-family: monospace; width: 300px; }
   .lobby-btn:hover { background: #1a0000; }
   .lobby-btn.green { border-color: #00cc44; color: #00cc44; }
   .lobby-btn.green:hover { background: #001a0a; }
-  #playerlist { color: #444; font-size: 11px; text-align: center; }
+  #playerlist { color: #444; font-size: 11px; text-align: center; max-width: 300px; }
   #waitMsg { color: #330000; font-size: 11px; letter-spacing: 1px; }
   #conn-status { font-size: 10px; color: #333; }
+
+  /* LAN info box */
+  #lan-info { background: #060006; border: 1px solid #330033; padding: 8px 14px; font-size: 10px; color: #440044; width: 300px; text-align: center; line-height: 1.7; display: none; }
+  #lan-info strong { color: #aa00aa; }
+  #lan-info .lan-url { color: #cc44cc; font-size: 12px; letter-spacing: 1px; }
 
   /* ── GAME ── */
   #game { display: none; flex-direction: column; align-items: center; }
@@ -73,21 +78,30 @@
 </style>
 </head>
 <body>
+<div id="app">
 
-<!-- ══ LOBBY ══════════════════════════════════════════════════════════════════ -->
+<!-- ══ LOBBY ══ -->
 <div id="lobby">
   <h1>☠ GHOST HUNT</h1>
-  <p>MULTIPLAYER HORROR</p>
-  <div id="conn-status">connecting...</div>
-  <input id="name-input" class="lobby-input" placeholder="Your name" maxlength="16" value="">
-  <input id="server-input" class="lobby-input" placeholder="Server (ws://localhost:3000)" value="ws://localhost:3000">
+  <p class="sub">MULTIPLAYER HORROR</p>
+  <div id="conn-status">—</div>
+
+  <!-- LAN info shown after server connects -->
+  <div id="lan-info">
+    <div>Share this address with friends on the <strong>same Wi-Fi</strong>:</div>
+    <div class="lan-url" id="lan-url-display">—</div>
+    <div style="font-size:9px;margin-top:4px;">They open it in any browser, no install needed.</div>
+  </div>
+
+  <input id="name-input"   class="lobby-input" placeholder="Your name" maxlength="16">
+  <input id="server-input" class="lobby-input" placeholder="Server address (auto-detecting...)" value="">
   <button class="lobby-btn" id="connect-btn">CONNECT</button>
   <div id="playerlist"></div>
   <button class="lobby-btn green" id="start-btn" style="display:none">START GAME</button>
   <div id="waitMsg"></div>
 </div>
 
-<!-- ══ GAME ═══════════════════════════════════════════════════════════════════ -->
+<!-- ══ GAME ══ -->
 <div id="game">
   <div id="game-wrap">
     <canvas id="gc"></canvas>
@@ -114,10 +128,12 @@
       <input id="chatinput" placeholder="chat or /start /reset..." maxlength="120">
     </div>
   </div>
-  <div id="controls-hint">WASD: move &nbsp;|&nbsp; MOUSE: look (click canvas) &nbsp;|&nbsp; F: flashlight &nbsp;|&nbsp; ESC: release mouse</div>
+  <div id="controls-hint">WASD / Arrow keys: move &nbsp;|&nbsp; MOUSE: look (click canvas) &nbsp;|&nbsp; F: flashlight &nbsp;|&nbsp; ESC: release mouse</div>
 </div>
 
-<!-- ══ OVERLAYS ════════════════════════════════════════════════════════════════ -->
+</div>
+
+<!-- ══ OVERLAYS ══ -->
 <div class="overlay" id="dead-overlay">
   <h2>YOU DIED</h2>
   <p>The ghost found you. Watch your teammates...</p>
@@ -136,37 +152,52 @@
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════════
-//  GHOST HUNT — MULTIPLAYER CLIENT
+//  GHOST HUNT — LAN MULTIPLAYER CLIENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const W = 640, H = 400, FOV = Math.PI / 3;
-let MAP = null;
-let ws = null;
-let myId = null;
-let gameState = null;
-let localPlayer = null;
-let frame = 0;
-let lastTime = 0;
-let mouseLocked = false;
-let scareFlash = 0;
-
-// Input state
+let MAP = null, ws = null, myId = null, gameState = null, localPlayer = null;
+let frame = 0, lastTime = 0, mouseLocked = false, scareFlash = 0;
 const keys = {};
-
-// Canvas
 const canvas = document.getElementById('gc');
 const ctx = canvas.getContext('2d');
 canvas.width = W; canvas.height = H;
-
-// Local movement state (client-side prediction)
 let lp = { x: 1.5, y: 1.5, angle: 0, flashlight: true, battery: 100, fear: 0, hasKey: false };
 
-// ─── WEBSOCKET ────────────────────────────────────────────────────────────────
+// ─── AUTO-DETECT SERVER IP ───────────────────────────────────────────────────
+// Ask the server its own LAN IP via /info and pre-fill the WS URL field.
+// This means players on other devices just open the page and the field is
+// already correct — they don't need to type anything.
+(async function autoDetectServer() {
+  const input = document.getElementById('server-input');
+  try {
+    const res = await fetch('/info');
+    if (!res.ok) throw new Error('no info');
+    const { wsUrl, lanIp, port } = await res.json();
+    // Use the actual LAN IP (not localhost) so it works from other devices
+    input.value = wsUrl;
+    // Show the LAN URL banner
+    const lanDisplay = document.getElementById('lan-url-display');
+    lanDisplay.textContent = `http://${lanIp}:${port}`;
+    document.getElementById('lan-info').style.display = 'block';
+    document.getElementById('conn-status').textContent = 'server found — enter name and connect';
+    document.getElementById('conn-status').style.color = '#446644';
+  } catch {
+    // Fallback: derive from current page URL (works when hosted on LAN)
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    input.value = `${proto}://${location.hostname}:${location.port || 3000}`;
+    document.getElementById('conn-status').textContent = 'enter name and connect';
+  }
+})();
+
+// ─── WEBSOCKET ───────────────────────────────────────────────────────────────
 function connect() {
-  const serverUrl = document.getElementById('server-input').value.trim() || 'ws://localhost:3000';
-  const nameVal = document.getElementById('name-input').value.trim();
+  const serverUrl = document.getElementById('server-input').value.trim();
+  const nameVal   = document.getElementById('name-input').value.trim();
+  if (!serverUrl) { document.getElementById('conn-status').textContent = 'no server url'; return; }
 
   document.getElementById('conn-status').textContent = 'connecting...';
+  document.getElementById('conn-status').style.color = '#444';
 
   try { ws = new WebSocket(serverUrl); }
   catch(e) { document.getElementById('conn-status').textContent = 'invalid url'; return; }
@@ -176,22 +207,18 @@ function connect() {
     document.getElementById('conn-status').style.color = '#006622';
     if (nameVal) ws.send(JSON.stringify({ type: 'setname', name: nameVal }));
   };
-
   ws.onclose = () => {
     document.getElementById('conn-status').textContent = '○ disconnected';
     document.getElementById('conn-status').style.color = '#440000';
     document.getElementById('lobby').style.display = 'flex';
-    document.getElementById('game').style.display = 'none';
+    document.getElementById('game').style.display  = 'none';
   };
-
   ws.onerror = () => {
     document.getElementById('conn-status').textContent = 'connection failed';
     document.getElementById('conn-status').style.color = '#660000';
   };
-
   ws.onmessage = (e) => {
-    let msg;
-    try { msg = JSON.parse(e.data); } catch { return; }
+    let msg; try { msg = JSON.parse(e.data); } catch { return; }
     handleMessage(msg);
   };
 }
@@ -200,61 +227,55 @@ function handleMessage(msg) {
   switch (msg.type) {
     case 'welcome':
       myId = msg.id;
-      MAP = msg.map;
+      MAP  = msg.map;
+      // If server sends its LAN IP, update the banner (useful for clients that
+      // connected via localhost and want to share the link)
+      if (msg.lanIp && msg.port) {
+        const lanDisplay = document.getElementById('lan-url-display');
+        lanDisplay.textContent = `http://${msg.lanIp}:${msg.port}`;
+        document.getElementById('lan-info').style.display = 'block';
+      }
       break;
 
     case 'state':
-      gameState = msg;
+      gameState   = msg;
       localPlayer = gameState.players[myId];
-
-      // Sync server state into local prediction
       if (localPlayer) {
-        lp.fear = localPlayer.fear;
-        lp.hasKey = localPlayer.hasKey;
-        lp.battery = localPlayer.battery;
+        lp.fear      = localPlayer.fear;
+        lp.hasKey    = localPlayer.hasKey;
+        lp.battery   = localPlayer.battery;
         lp.flashlight = localPlayer.flashlight;
       }
-
       updateLobbyUI();
       if (msg.phase === 'playing' && document.getElementById('lobby').style.display !== 'none') {
         startGameUI();
       }
-      if (msg.phase === 'lobby') {
-        document.getElementById('end-overlay').style.display = 'none';
-      }
+      if (msg.phase === 'lobby') document.getElementById('end-overlay').style.display = 'none';
       updateHUD();
       updateSidebar();
       break;
 
     case 'player_caught':
-      if (msg.id === myId) {
-        document.getElementById('dead-overlay').style.display = 'flex';
-        scareFlash = 1;
-      }
+      if (msg.id === myId) { document.getElementById('dead-overlay').style.display = 'flex'; scareFlash = 1; }
       addChat('SYSTEM', `☠ ${msg.name} was caught by the ghost!`, true);
       break;
-
     case 'key_collected':
       addChat('SYSTEM', `🗝 ${msg.by} collected the key!`, true);
       break;
-
     case 'ghost_event':
       if (msg.event === 'teleport') addChat('SYSTEM', 'The ghost teleported...', true);
       break;
-
     case 'chat':
       addChat(msg.name, msg.msg, msg.name === 'SYSTEM', msg.color);
       break;
   }
 
-  // Phase transitions
-  if (msg.type === 'state') {
-    if (msg.phase === 'ended') {
-      const endMsg = document.getElementById('end-msg');
-      if (msg.winner === 'ghost') endMsg.textContent = 'The ghost wins. All players caught.';
-      else endMsg.textContent = `${msg.winner} escaped! They win!`;
-      document.getElementById('end-overlay').style.display = 'flex';
-    }
+  if (msg.type === 'state' && msg.phase === 'ended') {
+    const endMsg = document.getElementById('end-msg');
+    endMsg.textContent = msg.winner === 'ghost'
+      ? 'The ghost wins. All players caught.'
+      : `${msg.winner} escaped! They win!`;
+    document.getElementById('end-overlay').style.display = 'flex';
   }
 }
 
@@ -265,7 +286,8 @@ function updateLobbyUI() {
   const startBtn = document.getElementById('start-btn');
   if (gameState.phase === 'lobby' && players.length >= 1) {
     startBtn.style.display = 'block';
-    document.getElementById('waitMsg').textContent = players.length === 1 ? 'You can start solo or wait for others' : '';
+    document.getElementById('waitMsg').textContent =
+      players.length === 1 ? 'Waiting for others, or start solo' : `${players.length} players ready`;
   } else {
     startBtn.style.display = 'none';
   }
@@ -273,21 +295,18 @@ function updateLobbyUI() {
 
 function startGameUI() {
   document.getElementById('lobby').style.display = 'none';
-  document.getElementById('game').style.display = 'flex';
-  if (localPlayer) {
-    lp.x = localPlayer.x; lp.y = localPlayer.y;
-    lp.angle = localPlayer.angle;
-  }
+  document.getElementById('game').style.display  = 'flex';
+  if (localPlayer) { lp.x = localPlayer.x; lp.y = localPlayer.y; lp.angle = localPlayer.angle; }
   requestAnimationFrame(gameLoop);
 }
 
 function updateHUD() {
   if (!localPlayer) return;
-  document.getElementById('bat-fill').style.width = lp.battery + '%';
+  document.getElementById('bat-fill').style.width      = lp.battery + '%';
   document.getElementById('bat-fill').style.background = lp.battery > 30 ? '#00cc44' : lp.battery > 10 ? '#cc8800' : '#cc0000';
-  document.getElementById('fear-fill').style.width = lp.fear + '%';
-  document.getElementById('hud-obj').textContent = lp.hasKey ? 'REACH THE EXIT' : 'FIND THE KEY';
-  document.getElementById('hud-phase').textContent = gameState?.phase?.toUpperCase() || '';
+  document.getElementById('fear-fill').style.width     = lp.fear + '%';
+  document.getElementById('hud-obj').textContent       = lp.hasKey ? 'REACH THE EXIT' : 'FIND THE KEY';
+  document.getElementById('hud-phase').textContent     = gameState?.phase?.toUpperCase() || '';
 }
 
 function updateSidebar() {
@@ -302,14 +321,13 @@ function updateSidebar() {
   }
 }
 
-// ─── RAYCASTER ────────────────────────────────────────────────────────────────
+// ─── RAYCASTER ───────────────────────────────────────────────────────────────
 function isWall(x, y) {
   if (!MAP) return true;
   const mx = Math.floor(x), my = Math.floor(y);
   if (mx < 0 || my < 0 || mx >= 20 || my >= 20) return true;
   return MAP[my][mx] === 1;
 }
-
 function castRay(ox, oy, angle) {
   const dx = Math.cos(angle), dy = Math.sin(angle);
   let t = 0, side = 0;
@@ -331,7 +349,6 @@ function renderFrame() {
   const sw = lp.flashlight ? Math.min(lp.battery / 100 * 0.85 + 0.15, 1) : 0.04;
   const zBuf = new Float32Array(W);
 
-  // Walls
   for (let col = 0; col < W; col++) {
     const rayAngle = lp.angle - FOV / 2 + (col / W) * FOV;
     const { dist: rd, side } = castRay(lp.x, lp.y, rayAngle);
@@ -342,24 +359,22 @@ function renderFrame() {
     const bot = Math.floor((H + wallH) / 2);
     const df = Math.max(0, 1 - rd / 14) * sw;
     const wc = side === 0 ? df * 0.65 : df;
-
     for (let row = 0; row < H; row++) {
       const idx = (row * W + col) * 4;
       if (row < top) {
         const cf = ((row / H) - 0.5) * -2 * 0.15 * sw;
-        buf[idx] = cf * 20 | 0; buf[idx+1] = cf * 5 | 0; buf[idx+2] = cf * 5 | 0; buf[idx+3] = 255;
+        buf[idx]=cf*20|0; buf[idx+1]=cf*5|0; buf[idx+2]=cf*5|0; buf[idx+3]=255;
       } else if (row > bot) {
         const ff = (0.5 - row / H) * 2 * 0.3 * sw;
-        buf[idx] = ff * 10 | 0; buf[idx+1] = ff * 8 | 0; buf[idx+2] = ff * 8 | 0; buf[idx+3] = 255;
+        buf[idx]=ff*10|0; buf[idx+1]=ff*8|0; buf[idx+2]=ff*8|0; buf[idx+3]=255;
       } else {
         const p = 1 + Math.sin(frame * 0.08) * 0.04;
-        buf[idx] = wc * 75 * p | 0; buf[idx+1] = wc * 18 | 0; buf[idx+2] = wc * 18 | 0; buf[idx+3] = 255;
+        buf[idx]=wc*75*p|0; buf[idx+1]=wc*18|0; buf[idx+2]=wc*18|0; buf[idx+3]=255;
       }
     }
   }
   ctx.putImageData(imgData, 0, 0);
 
-  // ── Sprites ──────────────────────────────────────────────────────────────
   function drawSprite(sx, sy, hScale, color, alpha, glowColor) {
     const d = Math.sqrt((sx - lp.x) ** 2 + (sy - lp.y) ** 2);
     if (d > 15) return;
@@ -367,37 +382,31 @@ function renderFrame() {
     const rel = ((angle - lp.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
     if (Math.abs(rel) > FOV / 2 + 0.2) return;
     const screenX = Math.floor((rel / FOV + 0.5) * W);
-    if (d < zBuf[screenX] || true) { // always draw sprites (behind walls handled by alpha)
-      const sh = Math.min(H / d * hScale, H);
-      const st = (H - sh) / 2;
-      const sw2 = sh * 0.55;
-      const fadeAlpha = alpha * Math.min(1, (15 - d) / 14) * (lp.flashlight ? 1 : 0.12);
-      if (fadeAlpha <= 0) return;
-      ctx.save();
-      ctx.globalAlpha = Math.min(fadeAlpha, 1);
-      const grd = ctx.createRadialGradient(screenX, H / 2, 0, screenX, H / 2, sw2);
-      grd.addColorStop(0, color);
-      grd.addColorStop(0.5, glowColor || color);
-      grd.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = grd;
-      ctx.beginPath();
-      ctx.ellipse(screenX, H / 2, sw2 / 2, sh / 2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
+    const sh = Math.min(H / d * hScale, H);
+    const sw2 = sh * 0.55;
+    const fadeAlpha = alpha * Math.min(1, (15 - d) / 14) * (lp.flashlight ? 1 : 0.12);
+    if (fadeAlpha <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = Math.min(fadeAlpha, 1);
+    const grd = ctx.createRadialGradient(screenX, H / 2, 0, screenX, H / 2, sw2);
+    grd.addColorStop(0, color);
+    grd.addColorStop(0.5, glowColor || color);
+    grd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.ellipse(screenX, H / 2, sw2 / 2, sh / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
-  // Draw ghost
+  // Ghost
   if (gameState.ghost) {
     const gd = Math.sqrt((lp.x - gameState.ghost.x) ** 2 + (lp.y - gameState.ghost.y) ** 2);
     drawSprite(gameState.ghost.x, gameState.ghost.y, 1.1, 'rgba(180,0,200,0.95)', gd < 8 ? 1 : 0.5, 'rgba(80,0,100,0.4)');
-    if (gd < 3) {
-      ctx.fillStyle = `rgba(150,0,150,${Math.min(0.5, (3 - gd) / 3)})`;
-      ctx.fillRect(0, 0, W, H);
-    }
+    if (gd < 3) { ctx.fillStyle = `rgba(150,0,150,${Math.min(0.5,(3-gd)/3)})`; ctx.fillRect(0,0,W,H); }
   }
 
-  // Draw key
+  // Key
   if (gameState.key && !gameState.key.collected) {
     const kd = Math.sqrt((lp.x - gameState.key.x) ** 2 + (lp.y - gameState.key.y) ** 2);
     if (kd < 12) {
@@ -408,19 +417,16 @@ function renderFrame() {
         const kh = Math.min(H / kd * 0.5, H);
         const kt = (H - kh) / 2;
         const aK = Math.min(1, (12 - kd) / 11) * sw;
-        ctx.save();
-        ctx.globalAlpha = aK;
+        ctx.save(); ctx.globalAlpha = aK;
         ctx.fillStyle = '#ffcc00';
-        ctx.beginPath();
-        ctx.arc(kx, kt + kh * 0.3, 7, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(kx, kt + kh * 0.3, 7, 0, Math.PI * 2); ctx.fill();
         ctx.fillRect(kx - 2, kt + kh * 0.3, 2, kh * 0.35);
         ctx.restore();
       }
     }
   }
 
-  // Draw exit
+  // Exit
   if (gameState.exit && lp.hasKey) {
     const ed = Math.sqrt((lp.x - gameState.exit.x) ** 2 + (lp.y - gameState.exit.y) ** 2);
     if (ed < 12) {
@@ -431,42 +437,36 @@ function renderFrame() {
         const eh = Math.min(H / ed * 0.8, H);
         const et = (H - eh) / 2;
         const ae2 = Math.min(1, (12 - ed) / 11) * sw;
-        ctx.save();
-        ctx.globalAlpha = ae2;
-        ctx.strokeStyle = '#00ff66';
-        ctx.lineWidth = 3;
+        ctx.save(); ctx.globalAlpha = ae2;
+        ctx.strokeStyle = '#00ff66'; ctx.lineWidth = 3;
         ctx.strokeRect(ex - 22, et, 44, eh);
-        ctx.fillStyle = 'rgba(0,180,60,0.2)';
-        ctx.fillRect(ex - 22, et, 44, eh);
+        ctx.fillStyle = 'rgba(0,180,60,0.2)'; ctx.fillRect(ex - 22, et, 44, eh);
         ctx.restore();
       }
     }
   }
 
-  // Draw other players as colored sprites
+  // Other players
   if (gameState.players) {
     for (const [pid, p] of Object.entries(gameState.players)) {
       if (pid === myId || !p.alive) continue;
-      drawSprite(p.x, p.y, 0.85, p.color.replace('hsl', 'hsla').replace(')', ',0.9)'), 0.9, 'rgba(0,0,0,0)');
+      drawSprite(p.x, p.y, 0.85, p.color.replace('hsl','hsla').replace(')',',0.9)'), 0.9, 'rgba(0,0,0,0)');
     }
   }
 
-  // Flashlight beam
+  // Flashlight vignette
   if (lp.flashlight) {
     const bl = ctx.createRadialGradient(W/2, H/2, 30, W/2, H/2, W*0.6);
     bl.addColorStop(0, 'rgba(0,0,0,0)');
     bl.addColorStop(1, `rgba(0,0,0,${0.7 - lp.battery/100*0.3})`);
-    ctx.fillStyle = bl;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = bl; ctx.fillRect(0, 0, W, H);
   } else {
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(0,0,0,0.85)'; ctx.fillRect(0, 0, W, H);
   }
 
   // Scare flash
   if (scareFlash > 0) {
-    ctx.fillStyle = `rgba(180,0,0,${scareFlash * 0.7})`;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = `rgba(180,0,0,${scareFlash * 0.7})`; ctx.fillRect(0, 0, W, H);
     scareFlash = Math.max(0, scareFlash - 0.04);
   }
 
@@ -476,15 +476,12 @@ function renderFrame() {
     const vg = ctx.createRadialGradient(W/2, H/2, H*0.2, W/2, H/2, H*0.75);
     vg.addColorStop(0, 'rgba(0,0,0,0)');
     vg.addColorStop(1, `rgba(90,0,0,${fv})`);
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
   }
 
   // Film grain
-  ctx.fillStyle = `rgba(0,0,0,${Math.random() * 0.04})`;
-  ctx.fillRect(0, Math.random() * H | 0, W, 1);
+  ctx.fillStyle = `rgba(0,0,0,${Math.random()*0.04})`; ctx.fillRect(0, Math.random()*H|0, W, 1);
 
-  // Minimap
   drawMinimap();
 }
 
@@ -492,67 +489,54 @@ function drawMinimap() {
   if (!MAP || !gameState) return;
   const ms = 5, ox = W - 108, oy = 5;
   ctx.globalAlpha = 0.55;
-  ctx.fillStyle = '#000'; ctx.fillRect(ox - 2, oy - 2, 104, 104);
-  for (let y = 0; y < 20; y++) {
-    for (let x = 0; x < 20; x++) {
-      ctx.fillStyle = MAP[y][x] ? '#2a0000' : '#080808';
-      ctx.fillRect(ox + x * ms, oy + y * ms, ms - 1, ms - 1);
-    }
+  ctx.fillStyle = '#000'; ctx.fillRect(ox-2, oy-2, 104, 104);
+  for (let y = 0; y < 20; y++) for (let x = 0; x < 20; x++) {
+    ctx.fillStyle = MAP[y][x] ? '#2a0000' : '#080808';
+    ctx.fillRect(ox + x*ms, oy + y*ms, ms-1, ms-1);
   }
-  // Players
   for (const [pid, p] of Object.entries(gameState.players)) {
     ctx.fillStyle = pid === myId ? '#00ff66' : p.color;
-    ctx.fillRect(ox + p.x * ms - 1.5, oy + p.y * ms - 1.5, 3, 3);
+    ctx.fillRect(ox + p.x*ms - 1.5, oy + p.y*ms - 1.5, 3, 3);
   }
-  // Key
   if (!gameState.key?.collected) {
     ctx.fillStyle = '#ffcc00';
-    ctx.fillRect(ox + gameState.key.x * ms - 1.5, oy + gameState.key.y * ms - 1.5, 3, 3);
+    ctx.fillRect(ox + gameState.key.x*ms - 1.5, oy + gameState.key.y*ms - 1.5, 3, 3);
   }
-  // Exit (if has key)
   if (lp.hasKey && gameState.exit) {
     ctx.fillStyle = '#00ff66';
-    ctx.fillRect(ox + gameState.exit.x * ms - 1.5, oy + gameState.exit.y * ms - 1.5, 3, 3);
+    ctx.fillRect(ox + gameState.exit.x*ms - 1.5, oy + gameState.exit.y*ms - 1.5, 3, 3);
   }
-  // Ghost (visible if close)
   const g = gameState.ghost;
-  const gd = Math.sqrt((lp.x - g.x) ** 2 + (lp.y - g.y) ** 2);
+  const gd = Math.sqrt((lp.x - g.x)**2 + (lp.y - g.y)**2);
   if (g && gd < 8 && lp.flashlight) {
     ctx.fillStyle = '#cc00cc';
-    ctx.fillRect(ox + g.x * ms - 1.5, oy + g.y * ms - 1.5, 3, 3);
+    ctx.fillRect(ox + g.x*ms - 1.5, oy + g.y*ms - 1.5, 3, 3);
   }
   ctx.globalAlpha = 1;
 }
 
-// ─── MOVEMENT (client-side prediction) ───────────────────────────────────────
+// ─── MOVEMENT ────────────────────────────────────────────────────────────────
 function updateMovement(dt) {
   if (!gameState || gameState.phase !== 'playing') return;
   if (localPlayer && !localPlayer.alive) return;
-
   const spd = 0.055 * dt * 60;
   let moved = false;
   const ox = lp.x, oy = lp.y;
-
-  if (keys['KeyW'] || keys['ArrowUp'])    { lp.x += Math.cos(lp.angle) * spd; lp.y += Math.sin(lp.angle) * spd; moved = true; }
-  if (keys['KeyS'] || keys['ArrowDown']) { lp.x -= Math.cos(lp.angle) * spd; lp.y -= Math.sin(lp.angle) * spd; moved = true; }
-  if (keys['KeyA']) { lp.x += Math.cos(lp.angle - Math.PI/2) * spd; lp.y += Math.sin(lp.angle - Math.PI/2) * spd; moved = true; }
-  if (keys['KeyD']) { lp.x += Math.cos(lp.angle + Math.PI/2) * spd; lp.y += Math.sin(lp.angle + Math.PI/2) * spd; moved = true; }
+  if (keys['KeyW'] || keys['ArrowUp'])    { lp.x += Math.cos(lp.angle)*spd; lp.y += Math.sin(lp.angle)*spd; moved=true; }
+  if (keys['KeyS'] || keys['ArrowDown'])  { lp.x -= Math.cos(lp.angle)*spd; lp.y -= Math.sin(lp.angle)*spd; moved=true; }
+  if (keys['KeyA'])                        { lp.x += Math.cos(lp.angle-Math.PI/2)*spd; lp.y += Math.sin(lp.angle-Math.PI/2)*spd; moved=true; }
+  if (keys['KeyD'])                        { lp.x += Math.cos(lp.angle+Math.PI/2)*spd; lp.y += Math.sin(lp.angle+Math.PI/2)*spd; moved=true; }
   if (!mouseLocked) {
-    if (keys['ArrowLeft'])  { lp.angle -= 0.035; moved = true; }
-    if (keys['ArrowRight']) { lp.angle += 0.035; moved = true; }
+    if (keys['ArrowLeft'])  { lp.angle -= 0.035; moved=true; }
+    if (keys['ArrowRight']) { lp.angle += 0.035; moved=true; }
   }
-
   if (isWall(lp.x, lp.y)) { lp.x = ox; lp.y = oy; }
-
-  // Battery drain
   if (lp.flashlight) {
     lp.battery = Math.max(0, lp.battery - 1.8 * dt);
     if (lp.battery <= 0) { lp.flashlight = false; addChat('SYSTEM', 'Battery dead!', true); }
   }
-
-  // Send to server
   if (moved || frame % 3 === 0) {
-    ws?.send(JSON.stringify({ type: 'move', x: lp.x, y: lp.y, angle: lp.angle, flashlight: lp.flashlight, battery: lp.battery }));
+    ws?.send(JSON.stringify({ type:'move', x:lp.x, y:lp.y, angle:lp.angle, flashlight:lp.flashlight, battery:lp.battery }));
   }
 }
 
@@ -560,63 +544,47 @@ function updateMovement(dt) {
 function gameLoop(ts) {
   if (!lastTime) lastTime = ts;
   const dt = Math.min((ts - lastTime) / 1000, 0.05);
-  lastTime = ts;
-  frame++;
-
+  lastTime = ts; frame++;
   updateMovement(dt);
   renderFrame();
   updateHUD();
-
   requestAnimationFrame(gameLoop);
 }
 
-// ─── INPUT ────────────────────────────────────────────────────────────────────
+// ─── INPUT ───────────────────────────────────────────────────────────────────
 document.addEventListener('keydown', e => {
   if (document.activeElement === document.getElementById('chatinput')) return;
   keys[e.code] = true;
-  if (e.code === 'KeyF') {
-    lp.flashlight = !lp.flashlight;
-    if (lp.flashlight && lp.battery <= 0) { lp.flashlight = false; }
-  }
+  if (e.code === 'KeyF') { lp.flashlight = !lp.flashlight; if (lp.flashlight && lp.battery<=0) lp.flashlight=false; }
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
 });
 document.addEventListener('keyup', e => { keys[e.code] = false; });
-
 canvas.addEventListener('click', () => canvas.requestPointerLock?.());
 document.addEventListener('pointerlockchange', () => { mouseLocked = !!document.pointerLockElement; });
 document.addEventListener('mousemove', e => {
   if (mouseLocked && gameState?.phase === 'playing') lp.angle += e.movementX * 0.002;
 });
 
-// ─── CHAT ─────────────────────────────────────────────────────────────────────
-function addChat(name, msg, isSystem = false, color = null) {
+// ─── CHAT ────────────────────────────────────────────────────────────────────
+function addChat(name, msg, isSystem=false, color=null) {
   const log = document.getElementById('chatlog');
   const div = document.createElement('div');
   div.className = isSystem ? 'sys' : '';
-  const nameSpan = color ? `<span style="color:${color}">${name}</span>` : `<span>${name}</span>`;
-  div.innerHTML = isSystem ? `<span style="color:#330000">${msg}</span>` : `${nameSpan}: ${msg}`;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
+  const ns = color ? `<span style="color:${color}">${name}</span>` : `<span>${name}</span>`;
+  div.innerHTML = isSystem ? `<span style="color:#330000">${msg}</span>` : `${ns}: ${msg}`;
+  log.appendChild(div); log.scrollTop = log.scrollHeight;
 }
-
 document.getElementById('chatinput').addEventListener('keydown', e => {
   if (e.code === 'Enter') {
     const val = e.target.value.trim();
-    if (val && ws) {
-      ws.send(JSON.stringify({ type: 'chat', msg: val }));
-      e.target.value = '';
-    }
+    if (val && ws) { ws.send(JSON.stringify({ type:'chat', msg:val })); e.target.value=''; }
   }
 });
 
-// ─── LOBBY BUTTONS ────────────────────────────────────────────────────────────
+// ─── LOBBY BUTTONS ───────────────────────────────────────────────────────────
 document.getElementById('connect-btn').addEventListener('click', connect);
-document.getElementById('start-btn').addEventListener('click', () => {
-  ws?.send(JSON.stringify({ type: 'start' }));
-});
-document.getElementById('name-input').addEventListener('keydown', e => {
-  if (e.code === 'Enter') connect();
-});
+document.getElementById('start-btn').addEventListener('click', () => ws?.send(JSON.stringify({ type:'start' })));
+document.getElementById('name-input').addEventListener('keydown', e => { if (e.code==='Enter') connect(); });
 </script>
 </body>
 </html>
